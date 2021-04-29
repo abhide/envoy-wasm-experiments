@@ -53,9 +53,19 @@ func (ctx *httpHeaders) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 		proxywasm.RemoveHttpRequestHeader(":path")
 		if err := proxywasm.AddHttpRequestHeader(":path", "/bogus_path"); err != nil {
 			proxywasm.LogErrorf("PLOT FAILED! Unable to change to bogus path")
+			return types.ActionContinue
 		}
 	}
-	return types.ActionContinue
+	hs := [][2]string{
+		{":method", "GET"}, {":path", "/uuid"}, {":authority", "httpbin.org"}, {":scheme", "http"},
+	}
+	if _, err := proxywasm.DispatchHttpCall(
+		"httpbin", hs, "", [][2]string{}, 5000, httpCallResponseCallback); err != nil {
+		proxywasm.LogCriticalf("Failed to dispatch http call", err)
+		return types.ActionContinue
+	}
+	proxywasm.LogInfo("Successfully dispatched httpcall")
+	return types.ActionPause
 }
 
 // Override DefaultHttpContext.
@@ -90,8 +100,25 @@ func (ctx *httpHeaders) OnHttpRequestBody(bodySize int, endOfStream bool) types.
 		proxywasm.LogCriticalf("Unable to get request body: [%v]", err)
 	}
 	proxywasm.LogInfof("Request Body: [%s]", string(body))
-
 	return types.ActionContinue
+}
+
+func httpCallResponseCallback(numHeaders int, bodySize int, numTrailers int) {
+	headers, err := proxywasm.GetHttpCallResponseHeaders()
+	if err != nil {
+		proxywasm.LogCriticalf("failed to get httpcall response headers", err)
+		return
+	}
+	for _, header := range headers {
+		proxywasm.LogInfof("httpCallResponse Header: [%s] :: Value: [%s]", header[0], header[1])
+	}
+	body, err := proxywasm.GetHttpCallResponseBody(0, bodySize)
+	if err != nil {
+		proxywasm.LogCriticalf("failed to get httpcall response body", err)
+		return
+	}
+	proxywasm.LogInfof("httpCall Response Body: [%s]", string(body))
+	proxywasm.ResumeHttpRequest()
 }
 
 func (ctx *httpHeaders) OnHttpResponseBody(bodySize int, endOfStream bool) types.Action {
