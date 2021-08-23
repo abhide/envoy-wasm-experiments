@@ -8,33 +8,39 @@ import (
 	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm/types"
 )
 
-type rootContext struct {
-	// You'd better embed the default root context
-	// so that you don't need to reimplement all the methods by yourself.
-	proxywasm.DefaultRootContext
+type vmContext struct {
+	types.DefaultVMContext
 }
 
-func newContext(uint32) proxywasm.RootContext { return &rootContext{} }
+type pluginContext struct {
+	types.DefaultPluginContext
+	contextID uint32
+}
+
+type httpContext struct {
+	// You'd better embed the default root context
+	// so that you don't need to reimplement all the methods by yourself.
+	types.DefaultHttpContext
+	contextID uint32
+}
+
+func (vmctx *vmContext) NewPluginContext(ID uint32) types.PluginContext {
+	return &pluginContext{
+		contextID: ID,
+	}
+}
 
 // Override DefaultRootContext.
-func newHttpContext(rootContextID uint32, contextID uint32) proxywasm.HttpContext {
-	return &httpHeaders{contextID: contextID}
-}
-
-type httpHeaders struct {
-	// You'd better embed the default root context
-	// so that you don't need to reimplement all the methods by yourself.
-	proxywasm.DefaultHttpContext
-	contextID uint32
+func (ctx *pluginContext) NewHttpContext(contextID uint32) types.HttpContext {
+	return &httpContext{contextID: contextID}
 }
 
 func main() {
 	proxywasm.LogInfo("Starting wasm plugin")
-	proxywasm.SetNewRootContext(newContext)
-	proxywasm.SetNewHttpContext(newHttpContext)
+	proxywasm.SetVMContext(&vmContext{})
 }
 
-func (ctx *httpHeaders) OnHttpRequestHeaders(numHeaders int, endOfStream bool) types.Action {
+func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) types.Action {
 	headers, err := proxywasm.GetHttpRequestHeaders()
 	if err != nil {
 		proxywasm.LogCriticalf("Unable to get request headers: [%v]", err)
@@ -60,7 +66,7 @@ func (ctx *httpHeaders) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 		{":method", "GET"}, {":path", "/uuid"}, {":authority", "httpbin.org"}, {":scheme", "http"},
 	}
 	if _, err := proxywasm.DispatchHttpCall(
-		"httpbin", hs, "", [][2]string{}, 5000, httpCallResponseCallback); err != nil {
+		"httpbin", hs, []byte{}, [][2]string{}, 5000, httpCallResponseCallback); err != nil {
 		proxywasm.LogCriticalf("Failed to dispatch http call", err)
 		return types.ActionContinue
 	}
@@ -69,7 +75,7 @@ func (ctx *httpHeaders) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 }
 
 // Override DefaultHttpContext.
-func (ctx *httpHeaders) OnHttpResponseHeaders(numHeaders int, endOfStream bool) types.Action {
+func (ctx *httpContext) OnHttpResponseHeaders(numHeaders int, endOfStream bool) types.Action {
 	headers, err := proxywasm.GetHttpResponseHeaders()
 	if err != nil {
 		proxywasm.LogCriticalf("Unable to get response headers: [%v]", err)
@@ -91,7 +97,7 @@ func (ctx *httpHeaders) OnHttpResponseHeaders(numHeaders int, endOfStream bool) 
 	return types.ActionContinue
 }
 
-func (ctx *httpHeaders) OnHttpRequestBody(bodySize int, endOfStream bool) types.Action {
+func (ctx *httpContext) OnHttpRequestBody(bodySize int, endOfStream bool) types.Action {
 	if bodySize <= 0 {
 		return types.ActionContinue
 	}
@@ -121,7 +127,7 @@ func httpCallResponseCallback(numHeaders int, bodySize int, numTrailers int) {
 	proxywasm.ResumeHttpRequest()
 }
 
-func (ctx *httpHeaders) OnHttpResponseBody(bodySize int, endOfStream bool) types.Action {
+func (ctx *httpContext) OnHttpResponseBody(bodySize int, endOfStream bool) types.Action {
 	if bodySize <= 0 {
 		return types.ActionContinue
 	}
@@ -137,6 +143,6 @@ func (ctx *httpHeaders) OnHttpResponseBody(bodySize int, endOfStream bool) types
 	if err != nil {
 		proxywasm.LogCriticalf("Unable to marshal response body: [%v]", err)
 	}
-	proxywasm.SetHttpResponseBody(newBody)
+	proxywasm.ReplaceHttpResponseBody(newBody)
 	return types.ActionContinue
 }
