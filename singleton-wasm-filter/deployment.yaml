@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels:
+    app: envoy
+    type: ingress
+spec:
+  replicas: 1
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: envoy
+      type: ingress
+  template:
+    metadata:
+      labels:
+        app: envoy
+        type: ingress
+    spec:
+      containers:
+      - name: envoy
+        imagePullPolicy: IfNotPresent
+        image: local-envoy:latest
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/envoy
+        - name: producer-wasm-volume
+          mountPath: /etc/envoy/producer-wasm
+        - name: consumer-wasm-volume
+          mountPath: /etc/envoy/consumer-wasm
+      volumes:
+        - name: config-volume
+          configMap:
+            name: envoy-config
+        - name: producer-wasm-volume
+          configMap:
+            name: producer-wasm-filter
+        - name: consumer-wasm-volume
+          configMap:
+            name: consumer-wasm-filter
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: envoy-ingress-svc
+spec:
+  type: NodePort
+  selector:
+    app: envoy
+    type: ingress
+  ports:
+    - protocol: TCP
+      port: 8080
+      nodePort: 30000
+      targetPort: 8080
